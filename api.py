@@ -6,6 +6,7 @@ import tempfile
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from config import ADMIN_TOKEN
 from database import SessionLocal
 from models import Task, User
 from oss_utils import upload_file
@@ -23,6 +24,14 @@ class RegisterRequest(BaseModel):
     device_id: str
 
 
+class RechargeRequest(BaseModel):
+    """管理员充值请求体。"""
+
+    device_id: str
+    count: int
+    admin_token: str
+
+
 @router.post("/user/register")
 def register_user(payload: RegisterRequest) -> dict[str, int]:
     """注册设备用户；如果用户已存在，直接返回剩余次数。"""
@@ -38,6 +47,37 @@ def register_user(payload: RegisterRequest) -> dict[str, int]:
             logger.info("用户已存在: device_id=%s", payload.device_id)
 
         return {"remaining_count": user.remaining_count}
+
+
+@router.post("/admin/recharge")
+def recharge_user(payload: RechargeRequest) -> dict[str, int | str]:
+    """管理员给指定设备用户增加剩余生成次数。"""
+    if payload.admin_token != ADMIN_TOKEN:
+        logger.warning("管理员充值失败，token 不匹配: device_id=%s", payload.device_id)
+        raise HTTPException(status_code=403, detail="管理员 token 无效")
+
+    if payload.count <= 0:
+        raise HTTPException(status_code=400, detail="充值次数必须大于 0")
+
+    with SessionLocal() as db:
+        user = db.query(User).filter(User.device_id == payload.device_id).first()
+        if user is None:
+            user = User(device_id=payload.device_id, remaining_count=0)
+            db.add(user)
+            db.flush()
+            logger.info("充值时自动创建用户: device_id=%s", payload.device_id)
+
+        user.remaining_count += payload.count
+        db.commit()
+        db.refresh(user)
+        logger.info(
+            "管理员充值成功: device_id=%s, count=%s, remaining_count=%s",
+            payload.device_id,
+            payload.count,
+            user.remaining_count,
+        )
+
+        return {"device_id": user.device_id, "remaining_count": user.remaining_count}
 
 
 @router.get("/user/info")

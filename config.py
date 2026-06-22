@@ -21,3 +21,6 @@ OSS_BUCKET_NAME = os.environ.get("OSS_BUCKET_NAME", "")
 AUTODL_TOKEN = os.environ.get("AUTODL_TOKEN", "")
 AUTODL_INSTANCE_ID = os.environ.get("AUTODL_INSTANCE_ID", "")
 AUTODL_MODEL_API_URL = os.environ.get("AUTODL_MODEL_API_URL", "")
+
+# 管理员接口访问令牌。
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
