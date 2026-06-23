@@ -98,7 +98,34 @@ def _cleanup_files(paths: list[str]) -> None:
             logger.warning("清理临时文件失败: %s, 错误: %s", path, exc)
 
 
-def _build_douyin_download_command(video_path: str, douyin_url: str) -> list[str]:
+def _write_douyin_cookie_file(cookie_header: str, cookie_path: str) -> None:
+    """把浏览器复制出的 Cookie 字符串转换为 yt-dlp 可读取的 Netscape cookies 文件。"""
+    cookie_text = cookie_header.strip()
+    if cookie_text.lower().startswith("cookie:"):
+        cookie_text = cookie_text.split(":", 1)[1].strip()
+
+    cookie_parts = [part.strip() for part in cookie_text.split(";") if "=" in part]
+    if not cookie_parts:
+        raise RuntimeError("DOUYIN_COOKIE 格式无效，未解析到 name=value")
+
+    lines = [
+        "# Netscape HTTP Cookie File",
+        "# Generated from DOUYIN_COOKIE by backend.",
+    ]
+    for domain in (".douyin.com", "www.douyin.com"):
+        for part in cookie_parts:
+            name, value = part.split("=", 1)
+            name = name.strip()
+            value = value.strip().replace("\r", "").replace("\n", "").replace("\t", " ")
+            if not name:
+                continue
+            lines.append(f"{domain}\tTRUE\t/\tTRUE\t2147483647\t{name}\t{value}")
+
+    with open(cookie_path, "w", encoding="utf-8") as file_obj:
+        file_obj.write("\n".join(lines) + "\n")
+
+
+def _build_douyin_download_command(video_path: str, douyin_url: str, cookie_path: str) -> list[str]:
     """构建 yt-dlp 下载命令，支持抖音 Cookie 和常见浏览器请求头。"""
     command = [
         "yt-dlp",
@@ -116,8 +143,9 @@ def _build_douyin_download_command(video_path: str, douyin_url: str) -> list[str
 
     douyin_cookie = _get_douyin_cookie()
     if douyin_cookie:
-        command.extend(["--add-headers", f"Cookie: {douyin_cookie}"])
-        logger.info("已配置抖音 Cookie，将携带 Cookie 下载视频")
+        _write_douyin_cookie_file(douyin_cookie, cookie_path)
+        command.extend(["--cookies", cookie_path])
+        logger.info("已配置抖音 Cookie，将通过 yt-dlp cookies 文件下载视频")
     else:
         logger.warning("未配置 DOUYIN_COOKIE，抖音链接可能因需要登录 Cookie 而下载失败")
 
@@ -135,7 +163,8 @@ def process_task(task_id: int) -> None:
     video_path = f"/tmp/{task_id}.mp4"
     audio_path = f"/tmp/{task_id}.mp3"
     generated_video_path = f"/tmp/{task_id}_gen.mp4"
-    temp_files = [video_path, audio_path, generated_video_path]
+    douyin_cookie_path = f"/tmp/{task_id}_douyin_cookies.txt"
+    temp_files = [video_path, audio_path, generated_video_path, douyin_cookie_path]
 
     try:
         task = db.query(Task).filter(Task.id == task_id).first()
@@ -164,7 +193,7 @@ def process_task(task_id: int) -> None:
             raise ValueError("任务缺少 photo_url")
 
         _run_command(
-            _build_douyin_download_command(video_path, task.douyin_url),
+            _build_douyin_download_command(video_path, task.douyin_url, douyin_cookie_path),
             "抖音视频下载",
             timeout=420,
         )
