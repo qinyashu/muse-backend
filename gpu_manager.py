@@ -137,11 +137,17 @@ class GPUManager:
             生成视频的临时 URL；失败时返回空字符串。
         """
         try:
+            if not AUTODL_MODEL_API_URL:
+                logger.error("AUTODL_MODEL_API_URL 未配置，无法调用模型 API")
+                return ""
+
+            logger.info("Calling model API at %s", AUTODL_MODEL_API_URL)
             response = requests.post(
                 AUTODL_MODEL_API_URL,
                 json={"image_url": image_url, "audio_url": audio_url},
                 timeout=600,
             )
+            logger.info("模型 API 返回状态码: %s", response.status_code)
             response.raise_for_status()
 
             try:

@@ -5,6 +5,7 @@ import time
 
 import requests
 
+from config import AUTODL_MODEL_API_URL
 from database import SessionLocal
 from gpu_manager import gpu_manager
 from models import Task
@@ -72,13 +73,17 @@ def process_task(task_id: int) -> None:
         db.commit()
         logger.info("任务已标记为 processing: task_id=%s", task_id)
 
-        # 登记 GPU 活跃请求，避免空闲关机定时器误关闭实例。
-        gpu_manager.acquire()
-        gpu_acquired = True
+        manage_autodl_instance = not AUTODL_MODEL_API_URL
+        if manage_autodl_instance:
+            # 登记 GPU 活跃请求，避免空闲关机定时器误关闭实例。
+            gpu_manager.acquire()
+            gpu_acquired = True
 
-        # 确保 AutoDL GPU 实例已开机。
-        if not gpu_manager.start_instance():
-            raise RuntimeError("GPU 实例启动失败")
+            # 确保 AutoDL GPU 实例已开机。
+            if not gpu_manager.start_instance():
+                raise RuntimeError("GPU 实例启动失败")
+        else:
+            logger.info("已配置 AUTODL_MODEL_API_URL，跳过 AutoDL 官方开机 API")
 
         if not task.douyin_url:
             raise ValueError("任务缺少 douyin_url")
