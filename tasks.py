@@ -148,8 +148,13 @@ def _build_douyin_download_command(video_path: str, douyin_url: str, cookie_path
     douyin_cookie = _get_douyin_cookie()
     if douyin_cookie:
         _write_douyin_cookie_file(douyin_cookie, cookie_path)
-        command.extend(["--cookies", cookie_path])
-        logger.info("已配置抖音 Cookie，将通过 yt-dlp cookies 文件下载视频")
+        command.extend([
+            "--cookies",
+            cookie_path,
+            "--add-headers",
+            f"Cookie: {douyin_cookie}",
+        ])
+        logger.warning("已配置抖音 Cookie，将通过 cookies 文件和请求头下载视频")
     else:
         logger.warning("未配置 DOUYIN_COOKIE，抖音链接可能因需要登录 Cookie 而下载失败")
 
