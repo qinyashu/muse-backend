@@ -1,4 +1,4 @@
-# 需要先安装 oss2 库（已在 requirements.txt 中包含）。
+# 需要先安装 oss2 库，已在 requirements.txt 中包含。
 import logging
 
 import oss2
@@ -14,8 +14,25 @@ from config import (
 logger = logging.getLogger(__name__)
 
 
+def _validate_config() -> None:
+    """检查 OSS 必要配置是否完整。"""
+    missing = [
+        name
+        for name, value in {
+            "OSS_ACCESS_KEY_ID": OSS_ACCESS_KEY_ID,
+            "OSS_ACCESS_KEY_SECRET": OSS_ACCESS_KEY_SECRET,
+            "OSS_ENDPOINT": OSS_ENDPOINT,
+            "OSS_BUCKET_NAME": OSS_BUCKET_NAME,
+        }.items()
+        if not value
+    ]
+    if missing:
+        raise RuntimeError(f"OSS 配置缺失: {', '.join(missing)}")
+
+
 def _get_bucket() -> oss2.Bucket:
     """创建并返回 OSS Bucket 实例。"""
+    _validate_config()
     auth = oss2.Auth(OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET)
     return oss2.Bucket(auth, OSS_ENDPOINT, OSS_BUCKET_NAME)
 

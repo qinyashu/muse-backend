@@ -3,7 +3,7 @@ import os
 import shutil
 import tempfile
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from config import ADMIN_TOKEN
@@ -96,12 +96,12 @@ def get_user_info(device_id: str) -> dict[str, int]:
 def create_task(
     background_tasks: BackgroundTasks,
     device_id: str = Form(...),
-    type: str = Form(...),
+    task_type: str = Form(..., alias="type"),
     douyin_url: str = Form(...),
     photo: UploadFile = File(...),
 ) -> dict[str, int]:
     """创建生成任务，上传照片到 OSS，并把后台任务加入 FastAPI 队列。"""
-    if type not in {"sing", "dance"}:
+    if task_type not in {"sing", "dance"}:
         raise HTTPException(status_code=400, detail="type 只能是 sing 或 dance")
 
     temp_photo_path = ""
@@ -117,23 +117,24 @@ def create_task(
             raise HTTPException(status_code=400, detail="剩余次数不足")
 
         try:
-            # 先创建任务并 flush，拿到 task.id 后才能按 photos/{task_id}.jpg 命名 OSS 对象。
+            # 先创建任务并 flush，拿到 task.id 后才能按 photos/{task_id} 命名 OSS 对象。
             task = Task(
                 user_id=user.id,
-                type=type,
+                type=task_type,
                 douyin_url=douyin_url,
                 photo_url="",
                 status="queued",
+                error_message=None,
             )
             db.add(task)
             db.flush()
 
-            # 将上传图片保存为临时文件，随后上传到 OSS。
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
+            suffix = os.path.splitext(photo.filename or "")[1] or ".jpg"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
                 shutil.copyfileobj(photo.file, temp_file)
                 temp_photo_path = temp_file.name
 
-            photo_url = upload_file(temp_photo_path, f"photos/{task.id}.jpg")
+            photo_url = upload_file(temp_photo_path, f"photos/{task.id}{suffix}")
             if not photo_url:
                 raise RuntimeError("照片上传 OSS 失败")
 
@@ -154,9 +155,8 @@ def create_task(
         except Exception as exc:
             db.rollback()
             logger.exception("创建任务失败: device_id=%s, 错误: %s", device_id, exc)
-            raise HTTPException(status_code=500, detail="创建任务失败") from exc
+            raise HTTPException(status_code=500, detail=f"创建任务失败: {exc}") from exc
         finally:
-            # 清理照片临时文件，避免本地磁盘堆积。
             try:
                 if temp_photo_path and os.path.exists(temp_photo_path):
                     os.remove(temp_photo_path)
@@ -166,11 +166,49 @@ def create_task(
 
 @router.get("/task/status")
 def get_task_status(task_id: int) -> dict[str, str | None]:
-    """查询任务状态和最终输出 URL。"""
+    """查询任务状态、最终输出 URL 和失败原因。"""
     with SessionLocal() as db:
         task = db.query(Task).filter(Task.id == task_id).first()
         if task is None:
             logger.warning("查询任务失败，任务不存在: task_id=%s", task_id)
             raise HTTPException(status_code=404, detail="任务不存在")
 
-        return {"status": task.status, "output_url": task.output_url}
+        return {
+            "status": task.status,
+            "output_url": task.output_url,
+            "error_message": task.error_message,
+        }
+
+
+@router.get("/task/list")
+def list_tasks(device_id: str) -> dict[str, list[dict[str, int | str | None]]]:
+    """查询指定设备用户的历史任务列表。"""
+    with SessionLocal() as db:
+        user = db.query(User).filter(User.device_id == device_id).first()
+        if user is None:
+            logger.warning("查询任务列表失败，用户不存在: device_id=%s", device_id)
+            raise HTTPException(status_code=404, detail="用户不存在")
+
+        tasks = (
+            db.query(Task)
+            .filter(Task.user_id == user.id)
+            .order_by(Task.created_at.desc())
+            .all()
+        )
+
+        return {
+            "tasks": [
+                {
+                    "id": task.id,
+                    "type": task.type,
+                    "douyin_url": task.douyin_url,
+                    "photo_url": task.photo_url,
+                    "audio_url": task.audio_url,
+                    "output_url": task.output_url,
+                    "status": task.status,
+                    "error_message": task.error_message,
+                    "created_at": task.created_at.isoformat() if task.created_at else None,
+                }
+                for task in tasks
+            ]
+        }

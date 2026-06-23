@@ -34,6 +34,7 @@ class Task(Base):
     audio_url = Column(String, nullable=True)
     output_url = Column(String, nullable=True)
     status = Column(String, default="pending", index=True, nullable=False)
+    error_message = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     user = relationship("User", back_populates="tasks")

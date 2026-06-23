@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class GPUManager:
-    """管理 AutoDL GPU 实例开关机，并封装模型 API 调用。"""
+    """管理 AutoDL 实例开关机，并封装模型 API 调用。"""
 
     INFO_URL = "https://api.autodl.com/v1/instance/info"
     START_URL = "https://api.autodl.com/v1/instance/start"
@@ -25,13 +25,15 @@ class GPUManager:
         self.lock = threading.Lock()
         # 延迟关机定时器；有新请求进入时会取消。
         self.shutdown_timer: threading.Timer | None = None
+        # 最近一次模型调用失败原因，供后台任务写入数据库。
+        self.last_error = ""
 
     def _headers(self) -> dict[str, str]:
         """生成 AutoDL API 请求头。"""
         return {"Authorization": f"Bearer {AUTODL_TOKEN}"}
 
     def _extract_status(self, payload: dict[str, Any]) -> str:
-        """从 AutoDL 返回数据中提取实例状态字符串。"""
+        """从 AutoDL 返回数据中提取实例状态。"""
         data = payload.get("data")
         if isinstance(data, dict):
             for key in ("status", "instance_status", "machine_status"):
@@ -50,7 +52,7 @@ class GPUManager:
         return "unknown"
 
     def _extract_video_url(self, payload: dict[str, Any]) -> str:
-        """从模型 API 返回数据中提取生成视频的临时 URL。"""
+        """从模型 API 返回数据中提取生成视频 URL。"""
         for key in ("video_url", "output_url", "url", "temporary_url", "temp_url"):
             value = payload.get(key)
             if value:
@@ -99,7 +101,6 @@ class GPUManager:
             logger.exception("启动 AutoDL 实例失败: %s", exc)
             return False
 
-        # 每 5 秒轮询一次实例状态，最多等待 2 分钟。
         deadline = time.time() + 120
         while time.time() < deadline:
             status = self.get_status().lower()
@@ -134,11 +135,13 @@ class GPUManager:
             audio_url: 输入音频 URL。
 
         返回:
-            生成视频的临时 URL；失败时返回空字符串。
+            生成视频的临时 URL；失败时返回空字符串，并写入 last_error。
         """
         try:
+            self.last_error = ""
             if not AUTODL_MODEL_API_URL:
-                logger.error("AUTODL_MODEL_API_URL 未配置，无法调用模型 API")
+                self.last_error = "AUTODL_MODEL_API_URL 未配置，无法调用模型 API"
+                logger.error(self.last_error)
                 return ""
 
             logger.info("Calling model API at %s", AUTODL_MODEL_API_URL)
@@ -148,6 +151,9 @@ class GPUManager:
                 timeout=600,
             )
             logger.info("模型 API 返回状态码: %s", response.status_code)
+            if response.status_code >= 400:
+                self.last_error = f"模型 API 请求失败: HTTP {response.status_code}, {response.text[:500]}"
+                logger.error(self.last_error)
             response.raise_for_status()
 
             try:
@@ -156,12 +162,15 @@ class GPUManager:
                 video_url = response.text.strip()
 
             if not video_url:
-                logger.warning("模型 API 未返回视频 URL: %s", response.text)
+                self.last_error = f"模型 API 未返回视频 URL: {response.text[:500]}"
+                logger.warning(self.last_error)
                 return ""
 
             logger.info("模型 API 调用成功，视频 URL: %s", video_url)
             return video_url
         except Exception as exc:
+            if not self.last_error:
+                self.last_error = f"调用模型 API 失败: {exc}"
             logger.exception("调用模型 API 失败: %s", exc)
             return ""
 
@@ -176,8 +185,6 @@ class GPUManager:
 
     def release(self) -> None:
         """释放一个活跃请求；当请求数归零时安排 5 分钟后关机。"""
-        should_schedule_shutdown = False
-
         with self.lock:
             if self.active_requests > 0:
                 self.active_requests -= 1
