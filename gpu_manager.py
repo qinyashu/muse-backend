@@ -5,7 +5,13 @@ from typing import Any
 
 import requests
 
-from config import AUTODL_INSTANCE_ID, AUTODL_MODEL_API_URL, AUTODL_TOKEN
+from config import (
+    AUTODL_INSTANCE_ID,
+    AUTODL_MODEL_API_URL,
+    AUTODL_TOKEN,
+    EAS_AUTH_TOKEN,
+    EAS_SERVICE_URL,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -139,15 +145,24 @@ class GPUManager:
         """
         try:
             self.last_error = ""
-            if not AUTODL_MODEL_API_URL:
-                self.last_error = "AUTODL_MODEL_API_URL 未配置，无法调用模型 API"
+
+            model_url = EAS_SERVICE_URL.rstrip("/") + "/generate" if EAS_SERVICE_URL else AUTODL_MODEL_API_URL
+            model_token = EAS_AUTH_TOKEN or AUTODL_TOKEN
+
+            if not model_url:
+                self.last_error = "未配置模型服务地址，无法调用模型 API"
                 logger.error(self.last_error)
                 return ""
 
-            logger.info("Calling model API at %s", AUTODL_MODEL_API_URL)
+            headers = {}
+            if model_token:
+                headers["Authorization"] = f"Bearer {model_token}"
+
+            logger.info("Calling model API at %s", model_url)
             response = requests.post(
-                AUTODL_MODEL_API_URL,
+                model_url,
                 json={"image_url": image_url, "audio_url": audio_url},
+                headers=headers or None,
                 timeout=600,
             )
             logger.info("模型 API 返回状态码: %s", response.status_code)

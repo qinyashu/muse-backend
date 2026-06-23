@@ -6,7 +6,7 @@ import time
 
 import requests
 
-from config import AUTODL_MODEL_API_URL, DOUYIN_COOKIE, DOUYIN_COOKIE_B64
+from config import AUTODL_MODEL_API_URL, DOUYIN_COOKIE, DOUYIN_COOKIE_B64, EAS_SERVICE_URL
 from database import SessionLocal
 from gpu_manager import gpu_manager
 from models import Task
@@ -186,7 +186,7 @@ def process_task(task_id: int) -> None:
         db.commit()
         logger.info("任务已标记为 processing: task_id=%s", task_id)
 
-        manage_autodl_instance = not AUTODL_MODEL_API_URL
+        manage_autodl_instance = not (EAS_SERVICE_URL or AUTODL_MODEL_API_URL)
         if manage_autodl_instance:
             gpu_manager.acquire()
             gpu_acquired = True

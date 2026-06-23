@@ -24,6 +24,10 @@ AUTODL_TOKEN = os.environ.get("AUTODL_TOKEN", "")
 AUTODL_INSTANCE_ID = os.environ.get("AUTODL_INSTANCE_ID", "")
 AUTODL_MODEL_API_URL = os.environ.get("AUTODL_MODEL_API_URL", "")
 
+# 阿里云 PAI-EAS 配置。优先使用这组变量调用模型服务。
+EAS_SERVICE_URL = os.environ.get("EAS_SERVICE_URL", "")
+EAS_AUTH_TOKEN = os.environ.get("EAS_AUTH_TOKEN", "")
+
 # 管理员接口访问令牌。
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
