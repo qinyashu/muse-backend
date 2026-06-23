@@ -112,14 +112,18 @@ def _write_douyin_cookie_file(cookie_header: str, cookie_path: str) -> None:
         "# Netscape HTTP Cookie File",
         "# Generated from DOUYIN_COOKIE by backend.",
     ]
-    for domain in (".douyin.com", "www.douyin.com"):
+    cookie_domains = (
+        (".douyin.com", "TRUE"),
+        ("www.douyin.com", "FALSE"),
+    )
+    for domain, include_subdomains in cookie_domains:
         for part in cookie_parts:
             name, value = part.split("=", 1)
             name = name.strip()
             value = value.strip().replace("\r", "").replace("\n", "").replace("\t", " ")
             if not name:
                 continue
-            lines.append(f"{domain}\tTRUE\t/\tTRUE\t2147483647\t{name}\t{value}")
+            lines.append(f"{domain}\t{include_subdomains}\t/\tTRUE\t2147483647\t{name}\t{value}")
 
     with open(cookie_path, "w", encoding="utf-8") as file_obj:
         file_obj.write("\n".join(lines) + "\n")
