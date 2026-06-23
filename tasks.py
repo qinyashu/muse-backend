@@ -196,16 +196,21 @@ def process_task(task_id: int) -> None:
         else:
             logger.info("已配置 AUTODL_MODEL_API_URL，跳过 AutoDL 官方开机 API")
 
-        if not task.douyin_url:
-            raise ValueError("任务缺少 douyin_url")
         if not task.photo_url:
             raise ValueError("任务缺少 photo_url")
 
-        _run_command(
-            _build_douyin_download_command(video_path, task.douyin_url, douyin_cookie_path),
-            "抖音视频下载",
-            timeout=420,
-        )
+        if task.source_video_url:
+            logger.info("任务包含上传源视频，跳过抖音解析: task_id=%s", task_id)
+            _download_file(task.source_video_url, video_path)
+        else:
+            if not task.douyin_url:
+                raise ValueError("任务缺少 douyin_url 或 source_video_url")
+
+            _run_command(
+                _build_douyin_download_command(video_path, task.douyin_url, douyin_cookie_path),
+                "抖音视频下载",
+                timeout=420,
+            )
 
         _run_command(
             ["ffmpeg", "-y", "-i", video_path, "-q:a", "0", "-map", "a", audio_path],

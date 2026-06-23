@@ -97,14 +97,20 @@ def create_task(
     background_tasks: BackgroundTasks,
     device_id: str = Form(...),
     task_type: str = Form(..., alias="type"),
-    douyin_url: str = Form(...),
+    douyin_url: str = Form(""),
     photo: UploadFile = File(...),
+    source_video: UploadFile | None = File(None),
 ) -> dict[str, int]:
     """创建生成任务，上传照片到 OSS，并把后台任务加入 FastAPI 队列。"""
     if task_type not in {"sing", "dance"}:
         raise HTTPException(status_code=400, detail="type 只能是 sing 或 dance")
 
+    clean_douyin_url = douyin_url.strip()
+    if not clean_douyin_url and source_video is None:
+        raise HTTPException(status_code=400, detail="请填写抖音链接或上传源视频")
+
     temp_photo_path = ""
+    temp_video_path = ""
 
     with SessionLocal() as db:
         user = db.query(User).filter(User.device_id == device_id).first()
@@ -121,7 +127,8 @@ def create_task(
             task = Task(
                 user_id=user.id,
                 type=task_type,
-                douyin_url=douyin_url,
+                douyin_url=clean_douyin_url,
+                source_video_url=None,
                 photo_url="",
                 status="queued",
                 error_message=None,
@@ -138,8 +145,20 @@ def create_task(
             if not photo_url:
                 raise RuntimeError("照片上传 OSS 失败")
 
+            source_video_url = None
+            if source_video is not None:
+                video_suffix = os.path.splitext(source_video.filename or "")[1] or ".mp4"
+                with tempfile.NamedTemporaryFile(delete=False, suffix=video_suffix) as temp_file:
+                    shutil.copyfileobj(source_video.file, temp_file)
+                    temp_video_path = temp_file.name
+
+                source_video_url = upload_file(temp_video_path, f"source_videos/{task.id}{video_suffix}")
+                if not source_video_url:
+                    raise RuntimeError("源视频上传 OSS 失败")
+
             # 写入照片 URL，扣减用户次数，并提交事务。
             task.photo_url = photo_url
+            task.source_video_url = source_video_url
             user.remaining_count -= 1
             db.commit()
             db.refresh(task)
@@ -160,8 +179,10 @@ def create_task(
             try:
                 if temp_photo_path and os.path.exists(temp_photo_path):
                     os.remove(temp_photo_path)
+                if temp_video_path and os.path.exists(temp_video_path):
+                    os.remove(temp_video_path)
             except Exception as exc:
-                logger.warning("清理照片临时文件失败: %s, 错误: %s", temp_photo_path, exc)
+                logger.warning("清理上传临时文件失败: photo=%s, video=%s, 错误: %s", temp_photo_path, temp_video_path, exc)
 
 
 @router.get("/task/status")
@@ -202,6 +223,7 @@ def list_tasks(device_id: str) -> dict[str, list[dict[str, int | str | None]]]:
                     "id": task.id,
                     "type": task.type,
                     "douyin_url": task.douyin_url,
+                    "source_video_url": task.source_video_url,
                     "photo_url": task.photo_url,
                     "audio_url": task.audio_url,
                     "output_url": task.output_url,

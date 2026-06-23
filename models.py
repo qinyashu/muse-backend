@@ -30,6 +30,7 @@ class Task(Base):
     user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
     type = Column(String, nullable=False)
     douyin_url = Column(String, nullable=True)
+    source_video_url = Column(String, nullable=True)
     photo_url = Column(String, nullable=True)
     audio_url = Column(String, nullable=True)
     output_url = Column(String, nullable=True)

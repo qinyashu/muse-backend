@@ -26,6 +26,8 @@ def _ensure_sqlite_schema_updates() -> None:
     with engine.begin() as connection:
         if "error_message" not in task_columns:
             connection.execute(text("ALTER TABLE tasks ADD COLUMN error_message VARCHAR"))
+        if "source_video_url" not in task_columns:
+            connection.execute(text("ALTER TABLE tasks ADD COLUMN source_video_url VARCHAR"))
 
 
 def init_db() -> None:
