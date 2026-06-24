@@ -201,7 +201,12 @@ def _call_eas_model(
     if not service_url:
         raise RuntimeError(f"{task_type} model service URL is not configured")
 
-    url = f"{service_url.rstrip('/')}/{endpoint.lstrip('/')}"
+    base_url = service_url.rstrip("/")
+    if "/api/predict/" in base_url:
+        url = base_url
+    else:
+        url = f"{base_url}/{endpoint.lstrip('/')}"
+
     headers: dict[str, str] = {}
     if auth_token:
         headers["Authorization"] = f"Bearer {auth_token}"
