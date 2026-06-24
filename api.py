@@ -6,9 +6,10 @@ import tempfile
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from auth_utils import hash_password, verify_password
 from config import ADMIN_TOKEN
 from database import SessionLocal
-from models import Task, User
+from models import HotVideo, Task, User
 from oss_utils import upload_file
 from tasks import process_task
 
@@ -19,42 +20,127 @@ router = APIRouter()
 
 
 class RegisterRequest(BaseModel):
-    """用户注册请求体。"""
-
     device_id: str
 
 
-class RechargeRequest(BaseModel):
-    """管理员充值请求体。"""
+class AuthRequest(BaseModel):
+    phone: str
+    password: str
 
+
+class RechargeRequest(BaseModel):
     device_id: str
     count: int
     admin_token: str
 
 
+class HotVideoRequest(BaseModel):
+    title: str
+    type: str = "sing"
+    cover_url: str
+    video_url: str
+    views: str = ""
+    sort_order: int = 0
+    is_enabled: bool = True
+    admin_token: str
+
+
+def _clean_phone(phone: str) -> str:
+    return "".join(char for char in phone.strip() if char.isdigit())
+
+
+def _validate_admin_token(admin_token: str) -> None:
+    if admin_token != ADMIN_TOKEN:
+        raise HTTPException(status_code=403, detail="管理员 token 无效")
+
+
+def _serialize_user(user: User) -> dict[str, int | str | bool]:
+    return {
+        "device_id": user.device_id,
+        "phone": user.phone or "",
+        "remaining_count": user.remaining_count,
+        "is_unlimited": bool(user.is_unlimited),
+    }
+
+
+def _serialize_hot_video(video: HotVideo) -> dict[str, int | str | bool]:
+    return {
+        "id": video.id,
+        "title": video.title,
+        "type": video.type,
+        "cover_url": video.cover_url,
+        "video_url": video.video_url,
+        "views": video.views,
+        "sort_order": video.sort_order,
+        "is_enabled": bool(video.is_enabled),
+    }
+
+
+@router.post("/auth/register")
+def auth_register(payload: AuthRequest) -> dict[str, int | str | bool]:
+    phone = _clean_phone(payload.phone)
+    password = payload.password.strip()
+
+    if len(phone) != 11:
+        raise HTTPException(status_code=400, detail="手机号格式不正确")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="密码至少 6 位")
+
+    with SessionLocal() as db:
+        existing = db.query(User).filter(User.phone == phone).first()
+        if existing is not None:
+            raise HTTPException(status_code=400, detail="手机号已注册，请直接登录")
+
+        user = User(
+            device_id=f"phone_{phone}",
+            phone=phone,
+            password_hash=hash_password(password),
+            remaining_count=1,
+            is_unlimited=False,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        logger.info("Phone account registered: phone=%s", phone)
+        return _serialize_user(user)
+
+
+@router.post("/auth/login")
+def auth_login(payload: AuthRequest) -> dict[str, int | str | bool]:
+    phone = _clean_phone(payload.phone)
+    password = payload.password.strip()
+
+    with SessionLocal() as db:
+        user = db.query(User).filter(User.phone == phone).first()
+        if user is None or not verify_password(password, user.password_hash):
+            raise HTTPException(status_code=401, detail="手机号或密码错误")
+
+        logger.info("Phone account logged in: phone=%s", phone)
+        return _serialize_user(user)
+
+
 @router.post("/user/register")
-def register_user(payload: RegisterRequest) -> dict[str, int]:
-    """注册设备用户；如果用户已存在，直接返回剩余次数。"""
+def register_user(payload: RegisterRequest) -> dict[str, int | bool]:
     with SessionLocal() as db:
         user = db.query(User).filter(User.device_id == payload.device_id).first()
         if user is None:
-            user = User(device_id=payload.device_id, remaining_count=1)
+            user = User(device_id=payload.device_id, remaining_count=1, is_unlimited=False)
             db.add(user)
             db.commit()
             db.refresh(user)
-            logger.info("新用户注册成功: device_id=%s", payload.device_id)
+            logger.info("Device user registered: device_id=%s", payload.device_id)
         else:
-            logger.info("用户已存在: device_id=%s", payload.device_id)
+            logger.info("Device user already exists: device_id=%s", payload.device_id)
 
-        return {"remaining_count": user.remaining_count}
+        return {
+            "remaining_count": user.remaining_count,
+            "is_unlimited": bool(user.is_unlimited),
+        }
 
 
 @router.post("/admin/recharge")
-def recharge_user(payload: RechargeRequest) -> dict[str, int | str]:
-    """管理员给指定设备用户增加剩余生成次数。"""
-    if payload.admin_token != ADMIN_TOKEN:
-        logger.warning("管理员充值失败，token 不匹配: device_id=%s", payload.device_id)
-        raise HTTPException(status_code=403, detail="管理员 token 无效")
+def recharge_user(payload: RechargeRequest) -> dict[str, int | str | bool]:
+    _validate_admin_token(payload.admin_token)
 
     if payload.count <= 0:
         raise HTTPException(status_code=400, detail="充值次数必须大于 0")
@@ -62,34 +148,114 @@ def recharge_user(payload: RechargeRequest) -> dict[str, int | str]:
     with SessionLocal() as db:
         user = db.query(User).filter(User.device_id == payload.device_id).first()
         if user is None:
-            user = User(device_id=payload.device_id, remaining_count=0)
+            user = User(device_id=payload.device_id, remaining_count=0, is_unlimited=False)
             db.add(user)
             db.flush()
-            logger.info("充值时自动创建用户: device_id=%s", payload.device_id)
+            logger.info("Created user during recharge: device_id=%s", payload.device_id)
 
         user.remaining_count += payload.count
         db.commit()
         db.refresh(user)
-        logger.info(
-            "管理员充值成功: device_id=%s, count=%s, remaining_count=%s",
-            payload.device_id,
-            payload.count,
-            user.remaining_count,
-        )
-
-        return {"device_id": user.device_id, "remaining_count": user.remaining_count}
+        return {
+            "device_id": user.device_id,
+            "remaining_count": user.remaining_count,
+            "is_unlimited": bool(user.is_unlimited),
+        }
 
 
 @router.get("/user/info")
-def get_user_info(device_id: str) -> dict[str, int]:
-    """查询用户剩余生成次数。"""
+def get_user_info(device_id: str = "", phone: str = "") -> dict[str, int | bool]:
     with SessionLocal() as db:
-        user = db.query(User).filter(User.device_id == device_id).first()
+        clean_phone = _clean_phone(phone) if phone else ""
+        if clean_phone:
+            user = db.query(User).filter(User.phone == clean_phone).first()
+        else:
+            user = db.query(User).filter(User.device_id == device_id).first()
+
         if user is None:
-            logger.warning("查询用户失败，用户不存在: device_id=%s", device_id)
+            logger.warning("User not found: device_id=%s, phone=%s", device_id, clean_phone)
             raise HTTPException(status_code=404, detail="用户不存在")
 
-        return {"remaining_count": user.remaining_count}
+        return {
+            "remaining_count": user.remaining_count,
+            "is_unlimited": bool(user.is_unlimited),
+        }
+
+
+@router.get("/hot-videos")
+def list_hot_videos() -> dict[str, list[dict[str, int | str | bool]]]:
+    with SessionLocal() as db:
+        videos = (
+            db.query(HotVideo)
+            .filter(HotVideo.is_enabled == True)  # noqa: E712
+            .order_by(HotVideo.sort_order.asc(), HotVideo.id.desc())
+            .all()
+        )
+        return {"videos": [_serialize_hot_video(video) for video in videos]}
+
+
+@router.post("/admin/hot-videos")
+def create_hot_video(payload: HotVideoRequest) -> dict[str, int | str | bool]:
+    _validate_admin_token(payload.admin_token)
+    if payload.type not in {"sing", "dance"}:
+        raise HTTPException(status_code=400, detail="type 只能是 sing 或 dance")
+
+    title = payload.title.strip()
+    cover_url = payload.cover_url.strip()
+    video_url = payload.video_url.strip()
+    if not title or not cover_url or not video_url:
+        raise HTTPException(status_code=400, detail="标题、封面和视频地址不能为空")
+
+    with SessionLocal() as db:
+        video = HotVideo(
+            title=title,
+            type=payload.type,
+            cover_url=cover_url,
+            video_url=video_url,
+            views=payload.views.strip(),
+            sort_order=payload.sort_order,
+            is_enabled=payload.is_enabled,
+        )
+        db.add(video)
+        db.commit()
+        db.refresh(video)
+        return _serialize_hot_video(video)
+
+
+@router.put("/admin/hot-videos/{video_id}")
+def update_hot_video(video_id: int, payload: HotVideoRequest) -> dict[str, int | str | bool]:
+    _validate_admin_token(payload.admin_token)
+    if payload.type not in {"sing", "dance"}:
+        raise HTTPException(status_code=400, detail="type 只能是 sing 或 dance")
+
+    with SessionLocal() as db:
+        video = db.query(HotVideo).filter(HotVideo.id == video_id).first()
+        if video is None:
+            raise HTTPException(status_code=404, detail="热门作品不存在")
+
+        video.title = payload.title.strip()
+        video.type = payload.type
+        video.cover_url = payload.cover_url.strip()
+        video.video_url = payload.video_url.strip()
+        video.views = payload.views.strip()
+        video.sort_order = payload.sort_order
+        video.is_enabled = payload.is_enabled
+        db.commit()
+        db.refresh(video)
+        return _serialize_hot_video(video)
+
+
+@router.delete("/admin/hot-videos/{video_id}")
+def delete_hot_video(video_id: int, admin_token: str) -> dict[str, bool]:
+    _validate_admin_token(admin_token)
+    with SessionLocal() as db:
+        video = db.query(HotVideo).filter(HotVideo.id == video_id).first()
+        if video is None:
+            raise HTTPException(status_code=404, detail="热门作品不存在")
+
+        db.delete(video)
+        db.commit()
+        return {"ok": True}
 
 
 @router.post("/task/create")
@@ -101,7 +267,6 @@ def create_task(
     photo: UploadFile = File(...),
     source_video: UploadFile | None = File(None),
 ) -> dict[str, int]:
-    """创建生成任务，上传照片到 OSS，并把后台任务加入 FastAPI 队列。"""
     if task_type not in {"sing", "dance"}:
         raise HTTPException(status_code=400, detail="type 只能是 sing 或 dance")
 
@@ -115,15 +280,14 @@ def create_task(
     with SessionLocal() as db:
         user = db.query(User).filter(User.device_id == device_id).first()
         if user is None:
-            logger.warning("创建任务失败，用户不存在: device_id=%s", device_id)
+            logger.warning("Create task failed, user not found: device_id=%s", device_id)
             raise HTTPException(status_code=404, detail="用户不存在")
 
-        if user.remaining_count <= 0:
-            logger.warning("创建任务失败，剩余次数不足: device_id=%s", device_id)
+        if not user.is_unlimited and user.remaining_count <= 0:
+            logger.warning("Create task failed, quota is not enough: device_id=%s", device_id)
             raise HTTPException(status_code=400, detail="剩余次数不足")
 
         try:
-            # 先创建任务并 flush，拿到 task.id 后才能按 photos/{task_id} 命名 OSS 对象。
             task = Task(
                 user_id=user.id,
                 type=task_type,
@@ -156,16 +320,15 @@ def create_task(
                 if not source_video_url:
                     raise RuntimeError("源视频上传 OSS 失败")
 
-            # 写入照片 URL，扣减用户次数，并提交事务。
             task.photo_url = photo_url
             task.source_video_url = source_video_url
-            user.remaining_count -= 1
+            if not user.is_unlimited:
+                user.remaining_count -= 1
             db.commit()
             db.refresh(task)
 
-            # 提交成功后再加入后台队列，避免后台任务读取不到数据库记录。
             background_tasks.add_task(process_task, task.id)
-            logger.info("任务创建成功: task_id=%s, device_id=%s", task.id, device_id)
+            logger.info("Task created: task_id=%s, device_id=%s", task.id, device_id)
             return {"task_id": task.id}
 
         except HTTPException:
@@ -173,7 +336,7 @@ def create_task(
             raise
         except Exception as exc:
             db.rollback()
-            logger.exception("创建任务失败: device_id=%s, 错误: %s", device_id, exc)
+            logger.exception("Create task failed: device_id=%s, error=%s", device_id, exc)
             raise HTTPException(status_code=500, detail=f"创建任务失败: {exc}") from exc
         finally:
             try:
@@ -182,16 +345,15 @@ def create_task(
                 if temp_video_path and os.path.exists(temp_video_path):
                     os.remove(temp_video_path)
             except Exception as exc:
-                logger.warning("清理上传临时文件失败: photo=%s, video=%s, 错误: %s", temp_photo_path, temp_video_path, exc)
+                logger.warning("Failed to remove upload temp files: %s", exc)
 
 
 @router.get("/task/status")
 def get_task_status(task_id: int) -> dict[str, str | None]:
-    """查询任务状态、最终输出 URL 和失败原因。"""
     with SessionLocal() as db:
         task = db.query(Task).filter(Task.id == task_id).first()
         if task is None:
-            logger.warning("查询任务失败，任务不存在: task_id=%s", task_id)
+            logger.warning("Task not found: task_id=%s", task_id)
             raise HTTPException(status_code=404, detail="任务不存在")
 
         return {
@@ -203,11 +365,10 @@ def get_task_status(task_id: int) -> dict[str, str | None]:
 
 @router.get("/task/list")
 def list_tasks(device_id: str) -> dict[str, list[dict[str, int | str | None]]]:
-    """查询指定设备用户的历史任务列表。"""
     with SessionLocal() as db:
         user = db.query(User).filter(User.device_id == device_id).first()
         if user is None:
-            logger.warning("查询任务列表失败，用户不存在: device_id=%s", device_id)
+            logger.warning("Task list failed, user not found: device_id=%s", device_id)
             raise HTTPException(status_code=404, detail="用户不存在")
 
         tasks = (

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import declarative_base, relationship
 
 from config import DEFAULT_REMAINING_COUNT
@@ -16,6 +16,9 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     device_id = Column(String, unique=True, index=True, nullable=False)
+    phone = Column(String, unique=True, index=True, nullable=True)
+    password_hash = Column(String, nullable=True)
+    is_unlimited = Column(Boolean, default=False, nullable=False)
     remaining_count = Column(Integer, default=DEFAULT_REMAINING_COUNT, nullable=False)
 
     tasks = relationship("Task", back_populates="user")
@@ -39,3 +42,19 @@ class Task(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     user = relationship("User", back_populates="tasks")
+
+
+class HotVideo(Base):
+    """Homepage hot video item managed by admin APIs."""
+
+    __tablename__ = "hot_videos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, nullable=False)
+    type = Column(String, default="sing", nullable=False)
+    cover_url = Column(String, nullable=False)
+    video_url = Column(String, nullable=False)
+    views = Column(String, default="", nullable=False)
+    sort_order = Column(Integer, default=0, nullable=False)
+    is_enabled = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
