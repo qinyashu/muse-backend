@@ -28,6 +28,10 @@ AUTODL_MODEL_API_URL = os.environ.get("AUTODL_MODEL_API_URL", "")
 EAS_SERVICE_URL = os.environ.get("EAS_SERVICE_URL", "")
 EAS_AUTH_TOKEN = os.environ.get("EAS_AUTH_TOKEN", "")
 
+# 跳舞模型 PAI-EAS 配置。
+EAS_DANCE_SERVICE_URL = os.environ.get("EAS_DANCE_SERVICE_URL", "")
+EAS_DANCE_AUTH_TOKEN = os.environ.get("EAS_DANCE_AUTH_TOKEN", "")
+
 # 管理员接口访问令牌。
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
