@@ -3,40 +3,82 @@ import os
 from dotenv import load_dotenv
 
 
-# 加载本地 .env；Railway 上会直接读取平台环境变量。
+# Railway reads environment variables from the platform. Local development can
+# still use a .env file.
 load_dotenv()
 
 
-# SQLite 数据库地址，部署时可通过 DATABASE_URL 覆盖。
+# Database.
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db")
 
-# 新用户默认剩余次数。
+# New-user default quota.
 DEFAULT_REMAINING_COUNT = int(os.getenv("DEFAULT_REMAINING_COUNT", "0"))
 
-# 阿里云 OSS 访问配置。
+# Aliyun OSS.
 OSS_ACCESS_KEY_ID = os.environ.get("OSS_ACCESS_KEY_ID", "")
 OSS_ACCESS_KEY_SECRET = os.environ.get("OSS_ACCESS_KEY_SECRET", "")
 OSS_ENDPOINT = os.environ.get("OSS_ENDPOINT", "")
 OSS_BUCKET_NAME = os.environ.get("OSS_BUCKET_NAME", "")
 
-# AutoDL 实例和模型 API 配置。
+# AutoDL legacy model API.
 AUTODL_TOKEN = os.environ.get("AUTODL_TOKEN", "")
 AUTODL_INSTANCE_ID = os.environ.get("AUTODL_INSTANCE_ID", "")
 AUTODL_MODEL_API_URL = os.environ.get("AUTODL_MODEL_API_URL", "")
 
-# 阿里云 PAI-EAS 配置。优先使用这组变量调用模型服务。
+# Existing MuseTalk / PAI-EAS singing model.
 EAS_SERVICE_URL = os.environ.get("EAS_SERVICE_URL", "")
 EAS_AUTH_TOKEN = os.environ.get("EAS_AUTH_TOKEN", "")
 
-# 跳舞模型 PAI-EAS 配置。
+# Singing MV provider. Use "comfyui" for the self-hosted ComfyUI workflow,
+# "eas" for the legacy MuseTalk service, "sync" for Sync Labs, or
+# "replicate" only when explicitly requested.
+SING_MODEL_PROVIDER = os.environ.get(
+    "SING_MODEL_PROVIDER",
+    (
+        "comfyui"
+        if os.environ.get("COMFYUI_SERVICE_URL")
+        else ("sync" if os.environ.get("SYNC_API_KEY") else "eas")
+    ),
+).strip().lower()
+SYNC_API_KEY = os.environ.get("SYNC_API_KEY", "")
+SYNC_API_BASE_URL = os.environ.get("SYNC_API_BASE_URL", "https://api.sync.so")
+SYNC_MODEL = os.environ.get("SYNC_MODEL", "sync-3")
+SYNC_GENERATION_OPTIONS_JSON = os.environ.get("SYNC_GENERATION_OPTIONS_JSON", "")
+SYNC_POLL_INTERVAL_SECONDS = float(os.environ.get("SYNC_POLL_INTERVAL_SECONDS", "5"))
+SYNC_TIMEOUT_SECONDS = int(os.environ.get("SYNC_TIMEOUT_SECONDS", "1800"))
+
+COMFYUI_SERVICE_URL = os.environ.get("COMFYUI_SERVICE_URL", "")
+COMFYUI_AUTH_TOKEN = os.environ.get("COMFYUI_AUTH_TOKEN", "")
+COMFYUI_REQUEST_MODE = os.environ.get("COMFYUI_REQUEST_MODE", "generate").strip().lower()
+COMFYUI_PROMPT = os.environ.get(
+    "COMFYUI_PROMPT",
+    "A stylish singer performing to camera, realistic, natural lip sync, cinematic music video, subtle body motion, soft stage lighting",
+)
+COMFYUI_NEGATIVE_PROMPT = os.environ.get(
+    "COMFYUI_NEGATIVE_PROMPT",
+    "low quality, blurry, distorted face, extra limbs, bad hands, jitter, warped mouth",
+)
+
+# Dance model.
 EAS_DANCE_SERVICE_URL = os.environ.get("EAS_DANCE_SERVICE_URL", "")
 EAS_DANCE_AUTH_TOKEN = os.environ.get("EAS_DANCE_AUTH_TOKEN", "")
+DANCE_ALLOW_DEGRADED_OUTPUT = os.environ.get("DANCE_ALLOW_DEGRADED_OUTPUT", "").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
-# 管理员接口访问令牌。
+# Admin API.
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
-# 抖音下载 Cookie。可直接填浏览器请求里的 Cookie 字符串。
+# Douyin download cookie.
 DOUYIN_COOKIE = os.environ.get("DOUYIN_COOKIE", "")
-
-# 抖音 Cookie 的 Base64 版本，适合 Cookie 含特殊字符时在命令行里配置。
 DOUYIN_COOKIE_B64 = os.environ.get("DOUYIN_COOKIE_B64", "")
+
+# Replicate online API.
+REPLICATE_API_TOKEN = os.environ.get("REPLICATE_API_TOKEN", "")
+REPLICATE_MODEL_VERSION = os.environ.get(
+    "REPLICATE_MODEL_VERSION",
+    "tencentarc/musetalk:b76242b40d67c76ab6742e987628a2a9ac019e11d56ab96c4e91ce03b79b2787",
+)
